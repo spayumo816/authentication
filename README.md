@@ -34,20 +34,23 @@ It handles user registration, email verification, login, password reset, and pro
 ## 📁 Project Structure
 
 ```
+configs/
+  db.js
+
 controllers/
-  auth/
-    authController.js
+  authController.js
 
 models/
   userModel.js
   residentModel.js
+  lguAdminModel.js
+  collectorModel.js
 
 routes/
   authRoutes.js
 
 middleware/
-  auth/
-    authMiddleware.js
+  authMiddleware.js
   validateRequest.js
 
 services/
