@@ -196,8 +196,10 @@ Make sure:
 
 ## 👨‍💻 Contributors
 
-* Your Name
-* Teammate Name
+* Stephanie P.
+* Robert H.
+* Rapp Micco R.
+* Byron R.
 
 ---
 
