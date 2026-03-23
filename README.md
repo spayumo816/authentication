@@ -194,6 +194,77 @@ Make sure:
 
 ---
 
+## 📧 How to Get Brevo API Key (Email Setup)
+
+This project uses **Brevo (formerly Sendinblue)** to send OTP emails.
+
+Follow these steps to set it up:
+
+### 1. Create a Brevo Account
+
+Go to:
+👉 https://www.brevo.com/
+
+Sign up for a free account.
+
+---
+
+### 2. Generate API Key
+
+1. Log in to your Brevo dashboard
+2. Go to **SMTP & API**
+3. Click **API Keys**
+4. Click **Generate a new API key**
+5. Copy the generated key (starts with `xkeysib-`)
+
+---
+
+### 3. Verify Sender Email
+
+1. Go to **Senders & Domains**
+2. Click **Add a sender**
+3. Enter your email address
+4. Verify it via the email Brevo sends you
+
+⚠️ **Important:**
+Emails will NOT send if the sender email is not verified.
+
+---
+
+### 4. Add to Environment Variables
+
+Update your `.env` file:
+
+```env
+BREVO_API_KEY=xkeysib-your-api-key-here
+BREVO_SENDER_EMAIL=your_verified_email@example.com
+```
+
+---
+
+### 5. Restart Your Server
+
+After updating `.env`, restart your server:
+
+```bash
+npm run dev
+```
+
+or redeploy if using Render.
+
+---
+
+## 🛠 Troubleshooting
+
+If OTP email is not sending:
+
+* ❌ API key is missing or incorrect
+* ❌ Sender email is not verified
+* ❌ `.env` not loaded (restart server)
+* ❌ Wrong environment variables in deployment (Render)
+
+---
+
 ## 👨‍💻 Contributors
 
 * Stephanie P.
