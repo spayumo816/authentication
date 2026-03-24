@@ -20,6 +20,13 @@ export const protect = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+    // added extra safety check for invalid token payload
+    if (!decoded?.id) {
+      return res.status(401).json({
+        message: "Not authorized, invalid token payload",
+      });
+    }
+
     const user = await User.findById(decoded.id).select(
       "-password -otp -otpExpires"
     );
@@ -43,4 +50,24 @@ export const protect = async (req, res, next) => {
       message: "Not authorized, token failed",
     });
   }
+};
+
+// added reusable role-based authorization middleware
+export const authorizeRoles = (...roles) => {
+  return (req, res, next) => {
+    // extra safety check in case protect middleware was skipped
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Not authorized, user data not found",
+      });
+    }
+
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        message: "Access denied",
+      });
+    }
+
+    next();
+  };
 };
