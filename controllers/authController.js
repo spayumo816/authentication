@@ -3,10 +3,10 @@ import jwt from "jsonwebtoken";
 
 import User from "../models/userModel.js";
 import Resident from "../models/residentModel.js";
-import Collector from "../models/collectorModel.js";
-import LGU from "../models/lguAdminModel.js";
 
 import { sendOTPEmail } from "../utils/emailUtils.js";
+
+import { isExpiredUnverifiedResident } from "../utils/isExpiredUtils.js";
 
 import {
   setOtpForUser,
@@ -14,8 +14,14 @@ import {
   clearOtpForUser,
 } from "../services/otpService.js";
 
-const generateToken = (userId) => {
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+// added role in the payload
+const generateToken = (user) => {
+  return jwt.sign(
+    { 
+    id: user._id,
+    role: user.role, 
+    }, 
+    process.env.JWT_SECRET, {
     expiresIn: "7d",
   });
 };
@@ -30,24 +36,32 @@ const sanitizeUser = (user) => ({
   isVerified: user.isVerified,
 });
 
-const deleteUserAndProfiles = async (userId) => {
-  await Promise.all([
-    Resident.deleteOne({ user: userId }),
-    Collector.deleteOne({ user: userId }),
-    LGU.deleteOne({ user: userId }),
-    User.deleteOne({ _id: userId }),
-  ]);
+// Delete only unverified user/residents
+const deleteUserAndProfiles = async (user) => {
+  const { _id, role } = user;
+
+  if (role === "resident") {
+    await Promise.all([
+      Resident.deleteOne({ user: _id }),
+      User.deleteOne({ _id }),
+    ]);
+  }
+  // Do nothing for LGU or Collector
 };
+
+const FIVE_DAYS = 5 * 24 * 60 * 60 * 1000;
 
 const deleteExpiredUnverifiedUserByEmail = async (email) => {
   const existingUser = await User.findOne({ email });
 
-  if (
-    existingUser &&
-    !existingUser.isVerified &&
-    existingUser.otpExpires &&
-    existingUser.otpExpires < new Date()
-  ) {
+  // if ( // repetitive code, move to utils
+  //   existingUser &&
+  //   existingUser.role === "resident" && // residents only
+  //   !existingUser.isVerified &&
+  //   existingUser.createdAt &&
+  //   Date.now() - new Date(existingUser.createdAt).getTime() > FIVE_DAYS
+  // ) 
+  if (isExpiredUnverifiedResident(existingUser, FIVE_DAYS)) {
     await deleteUserAndProfiles(existingUser._id);
     return true;
   }
@@ -63,41 +77,41 @@ export const registerUser = async (req, res) => {
       email,
       password,
       phone,
-      role,
-      address,
-      location,
+      // role, - better to be removed since this is default already
+      address, // qq: Let's put dropdowns in the frontend?
+      location, // qq: are we going to use an option to pin a map upon registration? or can this be generated based on user's address?
     } = req.body;
 
-    if (role && role !== "resident") {
-      return res.status(403).json({
-        message: "Only residents can self-register",
-      });
-    }
+    // if (role && role !== "resident") { - no need for this one
+    //   return res.status(403).json({
+    //     message: "Only residents can self-register",
+    //   });
+    // } 
 
     await deleteExpiredUnverifiedUserByEmail(email);
 
     const existingUser = await User.findOne({ email });
 
-    if (existingUser) {
+    if (existingUser) { // checks if existing and verified
       return res.status(400).json({
         message: existingUser.isVerified
           ? "User already exists with this email"
-          : "An unverified account already exists. Please verify your email or resend OTP.",
+          : "An unverified account already exists. Please verify your email or resend OTP.", // should have a modal to verify in frontend
       });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await User.create({
+    const user = await User.create({ // changed undefined to null
       firstName,
       lastName,
       email,
       password: hashedPassword,
       role: "resident",
-      phone: phone || undefined,
+      phone: phone || null,
       isVerified: false,
-      otp: undefined,
-      otpExpires: undefined,
+      otp: null,
+      otpExpires: null,
     });
 
     try {
@@ -115,7 +129,7 @@ export const registerUser = async (req, res) => {
         },
       });
     } catch (error) {
-      await User.deleteOne({ _id: user._id });
+      await User.deleteOne({ _id: user._id }); // this deletes saved data if registration failed
 
       return res.status(500).json({
         message: "Resident profile creation failed",
@@ -123,14 +137,14 @@ export const registerUser = async (req, res) => {
       });
     }
 
-    try {
+    try { //sending OTP
       const plainOtp = await setOtpForUser(user);
       await sendOTPEmail(user.email, "Verify Your Email", plainOtp);
     } catch (error) {
       await deleteUserAndProfiles(user._id);
 
       return res.status(500).json({
-        message: "Registration failed because OTP email could not be sent",
+        message: "Registration failed because OTP could not be sent",
         error: error.message,
       });
     }
@@ -227,7 +241,15 @@ export const resendVerificationOtp = async (req, res) => {
       });
     }
 
-    if (user.otpExpires && user.otpExpires < new Date()) {
+    // if (user.otpExpires && user.otpExpires < new Date()) { - should not be based on otp expiration
+    //   await deleteUserAndProfiles(user._id);
+
+    //   return res.status(400).json({
+    //     message: "Unverified account expired and was deleted. Please register again.",
+    //   });
+    // }
+
+    if (isExpiredUnverifiedResident(user, FIVE_DAYS)) { // let's stick to 5 days limit from the created date
       await deleteUserAndProfiles(user._id);
 
       return res.status(400).json({
@@ -258,7 +280,7 @@ export const loginUser = async (req, res) => {
 
     if (!user) {
       return res.status(401).json({
-        message: "Invalid email or password",
+        message: "Invalid credentials",
       });
     }
 
@@ -266,24 +288,32 @@ export const loginUser = async (req, res) => {
 
     if (!isPasswordMatch) {
       return res.status(401).json({
-        message: "Invalid email or password",
+        message: "Invalid credentials",
       });
     }
 
-    if (
-      user.role === "resident" &&
-      !user.isVerified &&
-      user.otpExpires &&
-      user.otpExpires < new Date()
-    ) {
+    // if (
+    //   user.role === "resident" &&
+    //   !user.isVerified &&
+    //   user.otpExpires &&
+    //   user.otpExpires < new Date()
+    // ) {
+    //   await deleteUserAndProfiles(user._id);
+
+    //   return res.status(403).json({
+    //     message: "Your unverified account expired and was deleted. Please register again.",
+    //   });
+    // }
+
+    if (isExpiredUnverifiedResident(user, FIVE_DAYS)) {
       await deleteUserAndProfiles(user._id);
 
-      return res.status(403).json({
-        message: "Your unverified account expired and was deleted. Please register again.",
+      return res.status(400).json({
+        message: "Unverified account expired and was deleted. Please register again.",
       });
     }
 
-    if (user.role === "resident" && !user.isVerified) {
+    if (user.role === "resident" && !user.isVerified) { // not yet an expired user
       return res.status(403).json({
         message: "Please verify your email before logging in",
       });
@@ -291,7 +321,7 @@ export const loginUser = async (req, res) => {
 
     let resident = null;
 
-    if (user.role === "resident") {
+    if (user.role === "resident") { // checks if resident and pull extended records from residentModel
       resident = await Resident.findOne({ user: user._id });
     }
 
@@ -334,7 +364,7 @@ export const forgotPassword = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({
-        message: "No account found with that email",
+        message: "Account does not exist",//"No account found with that email",
       });
     }
 
@@ -345,7 +375,7 @@ export const forgotPassword = async (req, res) => {
       message: "Password reset OTP sent successfully",
     });
   } catch (error) {
-    console.error("Forgot password error:", error);
+    // console.error("Forgot password error:", error);
     return res.status(500).json({
       message: "Server error during forgot password",
       error: error.message,
